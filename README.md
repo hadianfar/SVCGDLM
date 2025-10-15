@@ -1,6 +1,6 @@
 
 # SVCGDLM: Spatially Varying Coefficient Generalized Distributed Lag Models 
-
+Joint modeling of spatial heterogeneity and distributed lag effects
 <!-- badges: start -->
 <!-- badges: end -->
 
