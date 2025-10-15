@@ -1,0 +1,205 @@
+# Data simulation for SVCGDLM package
+# Load Required Packages
+if (!require(pacman)) install.packages("pacman")
+pacman::p_load(MASS, mnormt, boot, sf, dplyr, spdep, pgdraw, BayesLogit, Matrix, coda, parallel, optimParallel)
+set.seed(2365)
+#Temporal Correlation Function
+temporal_corr_fun <- function(L, phi) {
+  stopifnot(L > 0, phi > 0)  # Input validation
+  L <- L + 1  # Adjust for 0-based indexing
+  temporal_corr <- exp(-phi * abs(outer(1:L, 1:L, "-")))  # Vectorized
+  temporal_corr_inv <- solve(temporal_corr)
+  log_deter <- determinant(temporal_corr, logarithm = TRUE)$modulus
+  return(list(temporal_corr_inv = temporal_corr_inv, log_deter = log_deter))
+}
+
+n <- 5000                 # Sample size
+L <- 5                   # Number of exposure time periods
+g<-4 #Size of square spatial grid
+s<-g^2 #Number of spatial locations
+grid<-cell2nb(nrow=g,ncol=g,type="rook",torus=FALSE) #Evenly spaced grid
+neighbors<-nb2mat(grid,zero.policy=TRUE,style="B") #Adjacency matrix
+D<-diag(rowSums(neighbors))-neighbors # MCAR
+# Assign Site IDs
+site_id <- rep(s, times = n)
+for (j in 1:s) {
+  site_id[(1 + floor(n / s) * (j - 1)):(floor(n / s) * j)] <- j
+}
+# Generate Xlag Design Matrices
+x <- matrix(0, nrow = n, ncol = (L + 1))
+for (j in 1:s) {
+  x[site_id == j, ] <- matrix(rnorm(n = sum(site_id == j)),
+                              nrow = sum(site_id == j),
+                              ncol = (L + 1), byrow = TRUE)
+}
+#Data scale (interquartile range)
+for(j in 0:L){
+  x[,j]<-x[,j]/IQR(x[,j])
+}
+# generate fixed effect variables
+z <- cbind(rbinom(n, 1, 0.5), rnorm(n))
+sim_count<-100
+y_sim<-list(0)
+# True Parameter Values
+theta_true <- c(-0.1, 0.1)# for binomial response
+theta_true <- c(-0.5, 0.1)# for count response
+sigma2_beta_true <- 0.25
+phi_true <- 0.1
+gamma_true <- 0.8
+sigma2_eta_true <- 0.2
+rho_true <- 0.8
+r_true<-2# for count response
+#============================ Simulation Settings
+
+#Setting 1:  Single set of risk parameters
+#Setting 2:  Spatially-varying risk parameters (low and high spatial correlation)
+#Setting 3:  Spatially-varying risk parameters (no spatial correlation)
+
+#choose setting
+sim_setting=2
+likelihood_indicator =0 # 0: Binomial response and 1: count response
+
+#============================ setting 1
+if(sim_setting == 1){
+  set.seed(6286)
+  mu_beta_true<-list(0)
+  p_sim<-list(0)
+  mu_sim_list<-list(0)
+  for(sim_counter in 1:sim_count){
+    mu_beta_true[[sim_counter]]<-rmnorm (n=1,mean=rep(0, times=(L+1)),
+                                         sigma2_beta_true*chol2inv(chol(temporal_corr_fun(L, phi_true)[[1]])))
+    mu_beta_true[[sim_counter]]<-mu_beta_true[[sim_counter]] -
+      mean(mu_beta_true[[sim_counter]])
+    if (likelihood_indicator == 0) {
+      logit_p_sim<-z%*%theta_true +
+        x%*%mu_beta_true[[sim_counter]]
+      p_sim<-exp(logit_p_sim)/(1 + exp(logit_p_sim))
+      y_sim[[sim_counter]]<-rbinom(n=n,
+                                   size=1,
+                                   prob=p_sim)
+    }
+
+    if (likelihood_indicator == 1) {
+      mu_true<-z%*%theta_true +
+        x%*%mu_beta_true[[sim_counter]]
+      # Cap extreme latent means
+      max_mu <- quantile(mu_true, 0.95)
+      mu_true <- pmin(mu_true, max_mu)
+
+      p_sim<-exp(mu_true) / (1.00 + exp(mu_true))
+      mu_sim_list[[sim_counter]] <- mu_true
+
+      y_sim[[sim_counter]]<-rnbinom(n,size=r_true,prob=(1-p_sim))
+
+    }
+  }
+
+}
+  #============================ setting 2
+  if(sim_setting == 2){
+    set.seed(1365)
+    Bs_true<-list(0)
+    eta_true<-list(0)
+    p_sim<-list(0)
+    mu_sim_list<-list(0)
+
+    for(sim_counter in 1:sim_count){
+      Bs_true[[sim_counter]]<-list(0)
+      mu_beta_true<-rmnorm (n=1,mean=rep(0, times=(L+1)),
+                            sigma2_beta_true*chol2inv(chol(temporal_corr_fun(L, phi_true)[[1]])))
+      mu_beta_true<-mu_beta_true -
+        mean(mu_beta_true)
+      Bs_temp<-rmnorm (n=1,mean=rep(mu_beta_true, times=s),
+                       chol2inv(chol(kronecker((gamma_true*D + (1 - gamma_true)*diag(s)), chol2inv(chol(sigma2_beta_true*chol2inv(chol(temporal_corr_fun(L, phi_true)[[1]]))))))))
+      for(j in 1:s){
+        Bs_true[[sim_counter]][[j]]<-Bs_temp[(1 + (j-1)*(L+1)):((L+1)*j)]
+        Bs_true[[sim_counter]][[j]]<-Bs_true[[sim_counter]][[j]] -
+          mean(Bs_true[[sim_counter]][[j]])
+      }
+      eta_true[[sim_counter]]=rmnorm(n=1,mean=rep(0, times=s),sigma2_eta_true*solve(rho_true*D+(1-rho_true)*diag(s)))
+      if (likelihood_indicator == 0) {
+        logit_p_sim<-rep(0, times=n)
+        for(j in 1:s){
+          logit_p_sim[site_id == j]<-z[site_id == j,]%*%theta_true +
+            x[site_id == j,]%*%Bs_true[[sim_counter]][[j]]+eta_true[[sim_counter]][j]
+        }
+        p_sim<-exp(logit_p_sim)/(1 + exp(logit_p_sim))
+        y_sim[[sim_counter]]<-rbinom(n=n,
+                                     size=1,
+                                     prob=p_sim)
+      }
+      if (likelihood_indicator == 1) {
+        mu_true <- rep(0, times = n)
+        for(j in 1:s){
+          mu_true[site_id == j] <- z[(site_id == j), ] %*% theta_true +
+            x[(site_id == j), ] %*% Bs_true[[sim_counter]][[j]] + eta_true[[sim_counter]][j]
+        }
+
+        # Cap extreme latent means
+        max_mu <- quantile(mu_true, 0.95)
+        mu_true <- pmin(mu_true, max_mu)
+
+        p_sim <- exp(mu_true) / (1.00 + exp(mu_true))
+        mu_sim_list[[sim_counter]] <- mu_true
+        y_sim[[sim_counter]] <- rnbinom(n, size = r_true, prob = (1 - p_sim))
+
+      }
+
+    }
+
+}
+    #============================ Setting 3
+    if(sim_setting == 3){
+
+      set.seed(1146)
+
+      Bs_true<-list(0)
+      p_sim<-list(0)
+      mu_sim_list<-list(0)
+
+      for(sim_counter in 1:sim_count){
+
+        Bs_true[[sim_counter]]<-list(0)
+        mu_beta_true<-rmnorm (n=1,mean=rep(0, times=(L+1)),
+                              sigma2_beta_true*chol2inv(chol(temporal_corr_fun(L, phi_true)[[1]])))
+        mu_beta_true<-mu_beta_true -
+          mean(mu_beta_true)
+
+        Bs_temp<-rmnorm (n=1,mean=rep(mu_beta_true, times=s),
+                         chol2inv(chol(kronecker(diag(s), chol2inv(chol(sigma2_beta_true*chol2inv(chol(temporal_corr_fun(L, phi_true)[[1]]))))))))
+
+        for(j in 1:s){
+          Bs_true[[sim_counter]][[j]]<-Bs_temp[(1 + (j-1)*(L+1)):((L+1)*j)]
+          Bs_true[[sim_counter]][[j]]<-Bs_true[[sim_counter]][[j]] -
+            mean(Bs_true[[sim_counter]][[j]])
+        }
+        if (likelihood_indicator == 0) {
+          logit_p_sim<-rep(0, times=n)
+          for(j in 1:s){
+            logit_p_sim[site_id == j]<-z[site_id == j,]%*%theta_true +
+              x[site_id == j,]%*%Bs_true[[sim_counter]][[j]]
+          }
+
+          p_sim<-exp(logit_p_sim)/(1 + exp(logit_p_sim))
+          y_sim[[sim_counter]]<-rbinom(n=n,
+                                       size=1,
+                                       prob=p_sim)
+        }
+        if (likelihood_indicator == 1) {
+          mu_true<-rep(0, times=n)
+          for(j in 1:s){
+            mu_true[site_id == j]<-z[(site_id == j),]%*%theta_true +
+              x[(site_id == j),]%*%Bs_true[[sim_counter]][[j]]
+          }
+          # Cap extreme latent means
+          max_mu <- quantile(mu_true, 0.95)
+          mu_true <- pmin(mu_true, max_mu)
+
+          p_sim<-exp(mu_true) / (1.00 + exp(mu_true))
+          mu_sim_list[[sim_counter]] <- mu_true
+
+          y_sim[[sim_counter]]<-rnbinom(n,size=r_true,prob=(1-p_sim))
+        }
+
+      }
+}
