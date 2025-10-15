@@ -4,7 +4,7 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-This package implements a Monte Carlo Expectation-Maximization (MCEM) algorithm to estimate Spatially varying coefficient. The method relies using Polya-Gamma data augmentation to facilitate closed-form conditional distributions in the expectation step via Gibbs sampling. The maximization step then optimizes the expected complete-data log likelihood over both fixed and spatial parameters.
+This package implements a Monte Carlo Expectation-Maximization (MCEM) algorithm to estimate Spatially varying coefficient of Generalized Distributed Lag Models. The method relies using Polya-Gamma data augmentation to facilitate closed-form conditional distributions in the expectation step via Gibbs sampling. The maximization step then optimizes the expected complete-data log likelihood over both fixed and spatial parameters.
 
 
 
