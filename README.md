@@ -4,8 +4,10 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-This package implements a Monte Carlo Expectation-Maximization (MCEM) algorithm to estimate Spatially varying coefficient of Generalized Distributed Lag Models. The method relies using Polya-Gamma data augmentation to facilitate closed-form conditional distributions in the expectation step via Gibbs sampling. The maximization step then optimizes the expected complete-data log likelihood over both fixed and spatial parameters.
-
+SVCGDLM is an R package for fitting the Spatially Varying Coefficient Generalized Distributed Lag Model.
+The package provides tools for modeling exposure–lag–response relationships that vary across space, allowing both spatial nonstationarity and spatial dependence in the estimated effects.
+Parameter estimation is implemented via a Monte Carlo Expectation–Maximization (MCEM) algorithm using Polya–Gamma data augmentation, ensuring computational efficiency and scalability for large datasets.
+The package includes functions for model fitting, simulation, visualization, and performance evaluation under various spatial and temporal dependency structures.
 
 
 ## Installation
